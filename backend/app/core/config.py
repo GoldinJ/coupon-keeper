@@ -68,6 +68,12 @@ class Settings(BaseSettings):
             path=self.POSTGRES_DB,
         )
 
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def SQLALCHEMY_DATABASE_URI_SQLITE(self) -> str:
+        return "sqlite:///../app.db"
+
     SMTP_TLS: bool = True
     SMTP_SSL: bool = False
     SMTP_PORT: int = 587
