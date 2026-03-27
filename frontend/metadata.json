@@ -1,0 +1,5 @@
+{
+  "name": "CouponVault",
+  "description": "A functional prototype for managing and tracking discount coupons from various sources with expiry alerts.",
+  "requestFramePermissions": []
+}
