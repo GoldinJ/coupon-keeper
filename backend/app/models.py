@@ -121,9 +121,84 @@ class Token(SQLModel):
 
 # Contents of JWT token
 class TokenPayload(SQLModel):
-    sub: str | None = None
+    sub: uuid.UUID | None = None
 
 
 class NewPassword(SQLModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
+
+class IssuerBase(SQLModel):
+    id : uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+
+class Issuer(IssuerBase, table=True):
+    name: str = Field(min_length=1, max_length=255)
+    website: str | None = Field(default=None, max_length=255)
+    coupons: list["Coupon"] = Relationship(back_populates="issuer")
+
+class CouponBase(SQLModel):
+    '''id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    code TEXT NOT NULL,
+    source TEXT NOT NULL,
+    description TEXT,
+    expiry_date TEXT NOT NULL,
+    is_used INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    '''
+    id : uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+class Coupon(CouponBase, table=True):
+    title: str = Field(min_length=1, max_length=255)
+    source: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=255)
+    expiry_date: datetime
+    is_used: bool = False
+    code: str = Field(min_length=1, max_length=255)
+    issuer_id: uuid.UUID = Field(foreign_key="issuer.id", nullable=False)
+    issuer: Issuer = Relationship(
+        back_populates="coupons", sa_relationship_kwargs={"lazy": "selectin"}
+    )
+
+
+# Properties to receive on coupon creation
+class CouponCreate(SQLModel):
+    title: str = Field(min_length=1, max_length=255)
+    source: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=255)
+    expiry_date: datetime
+    code: str = Field(min_length=1, max_length=255)
+    issuer_id: uuid.UUID | None = None
+
+
+# Properties to receive on coupon update, all are optional
+class CouponUpdate(SQLModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    source: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=255)
+    expiry_date: datetime | None = None
+    is_used: bool | None = None
+    code: str | None = Field(default=None, min_length=1, max_length=255)
+    issuer_id: uuid.UUID | None = None
+
+
+# Properties to return via API
+class CouponPublic(SQLModel):
+    id: uuid.UUID
+    created_at: datetime | None = None
+    title: str
+    source: str
+    description: str | None = None
+    expiry_date: datetime
+    is_used: bool
+    code: str
+    issuer_id: uuid.UUID | None = None
+
+
+class CouponsPublic(SQLModel):
+    data: list[CouponPublic]
+    count: int

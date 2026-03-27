@@ -1,10 +1,13 @@
-from sqlmodel import Session, create_engine, select
+from sqlmodel import SQLModel, Session, create_engine, select
 
 from app import crud
 from app.core.config import settings
 from app.models import User, UserCreate
 
-engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+if settings.ENVIRONMENT == "local":
+    engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI_SQLITE), echo=True)
+else:
+    engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
 
 
 # make sure all SQLModel models are imported (app.models) before initializing DB
@@ -19,7 +22,8 @@ def init_db(session: Session) -> None:
     # from sqlmodel import SQLModel
 
     # This works because the models are already imported and registered from app.models
-    # SQLModel.metadata.create_all(engine)
+    if settings.ENVIRONMENT == "local":
+        SQLModel.metadata.create_all(engine)
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)
