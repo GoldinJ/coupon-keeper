@@ -196,6 +196,7 @@ class CouponService:
 		coupon = self.session.get(Coupon, coupon_id)
 		if not coupon:
 			raise HTTPException(status_code=404, detail="Coupon not found")
-		self.session.delete(coupon)
+		coupon.is_used = True
+		self.session.add(coupon)
 		self.session.commit()
 		return Message(message="Coupon deleted successfully")
