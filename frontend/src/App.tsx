@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, CheckCircle, Clock, Tag, Calendar, X, Search, Edit2, ChevronRight, Info, ArrowRight, Scissors } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, Tag, Calendar, X, Search, Edit2, ChevronRight, Info, ArrowRight, Scissors, LogOut } from 'lucide-react';
 import { format, isBefore, addDays, parseISO } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { QRCodeSVG } from 'qrcode.react';
+import Login from './components/Login';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -18,12 +19,26 @@ interface Coupon {
   description: string;
   expiry_date: string;
   is_used: boolean;
+  brand?: {
+    id: string;
+    name: string;
+    logo_url?: string | null;
+  };
+}
+
+interface Brand {
+  id: string;
+  name: string;
+  logo_url?: string | null;
+  website?: string | null;
 }
 
 const CATEGORIES = ['All', 'Clothes', 'Food', 'Tech', 'Other'];
 
 export default function App() {
+  const [token, setToken] = useState<string | null>(localStorage.getItem('access_token'));
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRedeemOpen, setIsRedeemOpen] = useState(false);
   const [selectedCoupon, setSelectedCoupon] = useState<Coupon | null>(null);
@@ -39,15 +54,43 @@ export default function App() {
     source: 'Other',
     description: '',
     expiry_date: format(new Date(), 'yyyy-MM-dd'),
+    brand_logo_url: '',
   });
 
   useEffect(() => {
-    fetchCoupons();
-  }, []);
+    if (token) {
+      fetchCoupons();
+      fetchBrands();
+    }
+  }, [token]);
+
+  const fetchBrands = async () => {
+    try {
+      const response = await fetch('/api/v1/brands/', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.status === 401) {
+        setToken(null);
+        localStorage.removeItem('access_token');
+        return;
+      }
+      const payload = await response.json();
+      setBrands(payload.data ?? []);
+    } catch (error) {
+      console.error('Failed to fetch brands:', error);
+    }
+  };
 
   const fetchCoupons = async () => {
     try {
-      const response = await fetch('/api/v1/coupons/');
+      const response = await fetch('/api/v1/coupons/', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.status === 401) {
+        setToken(null);
+        localStorage.removeItem('access_token');
+        return;
+      }
       const payload = await response.json();
       setCoupons(payload.data ?? []);
     } catch (error) {
@@ -59,20 +102,20 @@ export default function App() {
 
   const filteredCoupons = useMemo(() => {
     let result = coupons;
-    
+
     if (activeCategory !== 'All') {
       result = result.filter(c => c.source === activeCategory);
     }
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      result = result.filter(coupon => 
+      result = result.filter(coupon =>
         coupon.title.toLowerCase().includes(query) ||
         coupon.code.toLowerCase().includes(query) ||
         coupon.description.toLowerCase().includes(query)
       );
     }
-    
+
     return result;
   }, [coupons, searchQuery, activeCategory]);
 
@@ -86,14 +129,24 @@ export default function App() {
       const payload = {
         ...formData,
         expiry_date: new Date(formData.expiry_date).toISOString(),
+        brand_name: formData.title,
       };
-      
+
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(payload),
       });
-      
+
+      if (response.status === 401) {
+        setToken(null);
+        localStorage.removeItem('access_token');
+        return;
+      }
+
       if (response.ok) {
         fetchCoupons();
         closeModal();
@@ -111,6 +164,7 @@ export default function App() {
       source: 'Other',
       description: '',
       expiry_date: format(new Date(), 'yyyy-MM-dd'),
+      brand_logo_url: '',
     });
     setIsModalOpen(true);
   };
@@ -124,6 +178,7 @@ export default function App() {
       source: coupon.source,
       description: coupon.description || '',
       expiry_date: format(parseISO(coupon.expiry_date), 'yyyy-MM-dd'),
+      brand_logo_url: coupon.brand?.logo_url || '',
     });
     setIsModalOpen(true);
   };
@@ -135,11 +190,19 @@ export default function App() {
 
   const toggleUsed = async (id: string, currentStatus: boolean) => {
     try {
-      await fetch(`/api/v1/coupons/${id}`, {
+      const response = await fetch(`/api/v1/coupons/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ is_used: !currentStatus }),
       });
+      if (response.status === 401) {
+        setToken(null);
+        localStorage.removeItem('access_token');
+        return;
+      }
       fetchCoupons();
       setIsRedeemOpen(false);
     } catch (error) {
@@ -150,7 +213,15 @@ export default function App() {
   const deleteCoupon = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     try {
-      await fetch(`/api/v1/coupons/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/v1/coupons/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.status === 401) {
+        setToken(null);
+        localStorage.removeItem('access_token');
+        return;
+      }
       fetchCoupons();
     } catch (error) {
       console.error('Failed to delete coupon:', error);
@@ -182,6 +253,10 @@ export default function App() {
     return <Tag size={24} />;
   };
 
+  if (!token) {
+    return <Login onLogin={setToken} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-[#1A1A1A] font-sans selection:bg-indigo-100">
       {/* Mobile-style Header */}
@@ -189,7 +264,7 @@ export default function App() {
         <div className="max-w-md mx-auto flex items-center justify-between mb-8">
           <AnimatePresence mode="wait">
             {isSearchVisible ? (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
@@ -208,7 +283,7 @@ export default function App() {
                 </button>
               </motion.div>
             ) : (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
@@ -216,17 +291,24 @@ export default function App() {
               >
                 <h1 className="text-3xl font-black tracking-tight">Coupons</h1>
                 <div className="flex items-center gap-2">
-                  <button 
+                  <button
                     onClick={() => setIsSearchVisible(true)}
                     className="p-2 hover:bg-gray-100 rounded-full transition-colors"
                   >
                     <Search size={22} />
                   </button>
-                  <button 
+                  <button
                     onClick={openAddModal}
                     className="p-2 hover:bg-gray-100 rounded-full transition-colors"
                   >
                     <Plus size={22} />
+                  </button>
+                  <button
+                    onClick={() => { setToken(null); localStorage.removeItem('access_token'); }}
+                    className="p-2 hover:bg-red-50 rounded-full transition-colors text-red-500 ml-2"
+                    title="Sign Out"
+                  >
+                    <LogOut size={22} />
                   </button>
                 </div>
               </motion.div>
@@ -242,8 +324,8 @@ export default function App() {
               onClick={() => setActiveCategory(cat)}
               className={cn(
                 "px-6 py-2.5 rounded-full text-sm font-bold transition-all whitespace-nowrap",
-                activeCategory === cat 
-                  ? "bg-white shadow-[0_4px_20px_rgba(0,0,0,0.08)] text-indigo-600 border border-black/5" 
+                activeCategory === cat
+                  ? "bg-white shadow-[0_4px_20px_rgba(0,0,0,0.08)] text-indigo-600 border border-black/5"
                   : "text-gray-400 hover:text-gray-600"
               )}
             >
@@ -267,7 +349,7 @@ export default function App() {
             <AnimatePresence mode="popLayout">
               {filteredCoupons.map((coupon) => {
                 const expiringSoon = isExpiringSoon(coupon.expiry_date);
-                
+
                 return (
                   <motion.div
                     key={coupon.id}
@@ -289,10 +371,18 @@ export default function App() {
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-red-500 rounded-l-full" />
                     )}
 
-                    <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center shrink-0">
-                      <div className={getBrandColor(coupon.title)}>
-                        {getBrandIcon(coupon.title)}
-                      </div>
+                    <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden">
+                      {coupon.brand?.logo_url ? (
+                        <img
+                          src={coupon.brand.logo_url}
+                          alt={`${coupon.title} logo`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className={getBrandColor(coupon.title)}>
+                          {getBrandIcon(coupon.title)}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -306,13 +396,13 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-col gap-2">
-                      <button 
+                      <button
                         onClick={(e) => openEditModal(e, coupon)}
                         className="p-2 hover:bg-gray-100 rounded-full text-gray-300 hover:text-indigo-600 transition-colors"
                       >
                         <Edit2 size={16} />
                       </button>
-                      <button 
+                      <button
                         onClick={(e) => deleteCoupon(e, coupon.id)}
                         className="p-2 hover:bg-gray-100 rounded-full text-gray-300 hover:text-red-500 transition-colors"
                       >
@@ -347,10 +437,18 @@ export default function App() {
             </div>
 
             <div className="flex-1 px-10 flex flex-col items-center text-center">
-              <div className={cn("w-32 h-32 mb-8 flex items-center justify-center", getBrandColor(selectedCoupon.title))}>
-                {React.cloneElement(getBrandIcon(selectedCoupon.title) as React.ReactElement, { size: 80 })}
+              <div className={cn("w-32 h-32 mb-8 flex items-center justify-center rounded-3xl overflow-hidden", getBrandColor(selectedCoupon.title))}>
+                {selectedCoupon.brand?.logo_url ? (
+                  <img
+                    src={selectedCoupon.brand.logo_url}
+                    alt={`${selectedCoupon.title} logo`}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  React.cloneElement(getBrandIcon(selectedCoupon.title) as React.ReactElement, { size: 80 })
+                )}
               </div>
-              
+
               <h2 className="text-4xl font-black mb-4">{selectedCoupon.description || 'Discount'}</h2>
               <p className="text-gray-400 font-medium mb-1">on purchase of {selectedCoupon.title}</p>
               <p className="text-red-500 font-bold mb-12">till {format(parseISO(selectedCoupon.expiry_date), 'MMM d')}</p>
@@ -358,7 +456,7 @@ export default function App() {
               <div className="bg-white p-6 rounded-3xl shadow-[0_10px_40px_rgba(0,0,0,0.05)] border border-black/5 mb-8">
                 <QRCodeSVG value={selectedCoupon.code} size={160} />
               </div>
-              
+
               <div className="flex flex-col items-center gap-2">
                 <span className="text-xs font-bold text-gray-300 uppercase tracking-[0.2em]">Coupon Code</span>
                 <code className="text-2xl font-black tracking-widest font-mono">{selectedCoupon.code}</code>
@@ -411,17 +509,31 @@ export default function App() {
                   <X size={20} />
                 </button>
               </div>
-              
+
               <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                <datalist id="brands-list">
+                  {brands.map(iss => (
+                    <option key={iss.id} value={iss.name} />
+                  ))}
+                </datalist>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Brand Name</label>
                   <input
                     required
                     type="text"
+                    list="brands-list"
                     placeholder="e.g. Adidas, iHerb"
                     className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold"
                     value={formData.title}
-                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const existingIssuer = brands.find(iss => iss.name === val);
+                      setFormData({
+                        ...formData,
+                        title: val,
+                        brand_logo_url: existingIssuer?.logo_url || formData.brand_logo_url
+                      });
+                    }}
                   />
                 </div>
                 <div>
@@ -444,6 +556,16 @@ export default function App() {
                     className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-mono font-bold"
                     value={formData.code}
                     onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Issuer Logo URL (Optional)</label>
+                  <input
+                    type="url"
+                    placeholder="e.g. https://example.com/logo.png"
+                    className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-mono text-sm"
+                    value={formData.brand_logo_url}
+                    onChange={(e) => setFormData({ ...formData, brand_logo_url: e.target.value })}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
