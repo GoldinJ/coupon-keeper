@@ -133,6 +133,7 @@ class IssuerBase(SQLModel):
 
 class Issuer(IssuerBase, table=True):
     name: str = Field(min_length=1, max_length=255)
+    logo_url: str | None = Field(default=None, max_length=255)
     website: str | None = Field(default=None, max_length=255)
     coupons: list["Coupon"] = Relationship(back_populates="issuer")
 
