@@ -82,6 +82,7 @@ export default function App() {
   const [isBrandDropdownOpen, setIsBrandDropdownOpen] = useState(false);
   const [redeemAmount, setRedeemAmount] = useState('');
   const [redeemError, setRedeemError] = useState('');
+  const [showUsed, setShowUsed] = useState(false);
   const brandSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [formData, setFormData] = useState({
@@ -156,6 +157,10 @@ export default function App() {
       result = result.filter(c => c.source === activeCategory);
     }
 
+    if (!showUsed) {
+      result = result.filter(c => !c.is_used);
+    }
+
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(coupon =>
@@ -166,7 +171,7 @@ export default function App() {
     }
 
     return result;
-  }, [coupons, searchQuery, activeCategory]);
+  }, [coupons, searchQuery, activeCategory, showUsed]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,6 +185,9 @@ export default function App() {
       const isStoredValue = formData.coupon_type === 'voucher' || formData.coupon_type === 'gift_card';
       const payload = {
         ...formData,
+        description: isStoredValue
+          ? buildStoredValueDescription(initialValue, currentValue ?? initialValue, formData.currency as Coupon['currency'])
+          : formData.description,
         expiry_date: new Date(formData.expiry_date).toISOString(),
         brand_name: formData.title,
         brand_color: formData.brand_color || null,
@@ -416,13 +424,14 @@ export default function App() {
   };
 
 
-  const getBrandIcon = (title: string) => {
+  const getBrandIcon = (title: string, size = 24) => {
     const t = title.toLowerCase();
-    if (t.includes('adidas')) return <Scissors size={24} />;
-    if (t.includes('iherb')) return <Tag size={24} />;
-    if (t.includes('puma')) return <Tag size={24} />;
-    if (t.includes('mcdonald')) return <Tag size={24} />;
-    return <Tag size={24} />;
+    const iconClass = 'text-gray-400';
+    if (t.includes('adidas')) return <Scissors size={size} className={iconClass} />;
+    if (t.includes('iherb')) return <Tag size={size} className={iconClass} />;
+    if (t.includes('puma')) return <Tag size={size} className={iconClass} />;
+    if (t.includes('mcdonald')) return <Tag size={size} className={iconClass} />;
+    return <Tag size={size} className={iconClass} />;
   };
 
   const resolveCurrencySymbol = (currency?: Coupon['currency']) => {
@@ -431,12 +440,40 @@ export default function App() {
     return '₪';
   };
 
-  const formatBalance = (coupon: Coupon) => {
+  const buildStoredValueDescription = (
+    initialValue: number | null,
+    currentValue: number | null,
+    currency?: Coupon['currency']
+  ) => {
+    const symbol = resolveCurrencySymbol(currency);
+    const current = currentValue ?? initialValue ?? 0;
+    const initial = initialValue ?? current;
+    return `${symbol} ${current.toFixed(2)} of ${symbol} ${initial.toFixed(2)} left`;
+  };
+
+  const getBalanceInfo = (coupon: Coupon) => {
     const symbol = resolveCurrencySymbol(coupon.currency);
     const current = coupon.current_value ?? coupon.initial_value ?? 0;
-    const initial = coupon.initial_value ?? current;
-    return `${symbol} ${current.toFixed(2)} / ${symbol} ${initial.toFixed(2)} left`;
+    const initial = coupon.initial_value ?? current ?? 0;
+    const safeInitial = initial > 0 ? initial : 0;
+    const percent = safeInitial > 0 ? Math.min(100, Math.max(0, (current / safeInitial) * 100)) : 0;
+    return {
+      current,
+      initial: safeInitial,
+      percent,
+      label: `${symbol} ${current.toFixed(2)} of ${symbol} ${safeInitial.toFixed(2)} left`,
+    };
   };
+
+  const normalizeWebsiteUrl = (url?: string | null) => {
+    if (!url) return null;
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+  };
+
+  const selectedBalanceInfo = selectedCoupon ? getBalanceInfo(selectedCoupon) : null;
 
   if (!token) {
     return <Login onLogin={setToken} />;
@@ -512,6 +549,17 @@ export default function App() {
             </button>
           ))}
         </div>
+        <div className="max-w-md mx-auto flex items-center justify-between pt-2">
+          <label className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-200 text-indigo-600 focus:ring-indigo-500"
+              checked={showUsed}
+              onChange={(e) => setShowUsed(e.target.checked)}
+            />
+            Show used
+          </label>
+        </div>
       </header>
 
       <main className="max-w-md mx-auto px-6 pb-24">
@@ -530,6 +578,7 @@ export default function App() {
                 const expiringSoon = isExpiringSoon(coupon.expiry_date);
                 const brandAccent = resolveBrandColor(coupon.brand?.color);
                 const isStoredValue = coupon.coupon_type === 'voucher' || coupon.coupon_type === 'gift_card';
+                const balanceInfo = isStoredValue ? getBalanceInfo(coupon) : null;
                 const typeLabel = coupon.coupon_type === 'gift_card'
                   ? 'Gift Card'
                   : coupon.coupon_type === 'voucher'
@@ -568,15 +617,15 @@ export default function App() {
                       />
                     )}
 
-                    <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden">
+                    <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden p-2">
                       {coupon.brand?.logo_url ? (
                         <img
                           src={coupon.brand.logo_url}
                           alt={`${coupon.title} logo`}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-contain"
                         />
                       ) : (
-                        getBrandIcon(coupon.title)
+                        getBrandIcon(coupon.title, 28)
                       )}
                     </div>
 
@@ -590,9 +639,23 @@ export default function App() {
                           {typeLabel}
                         </span>
                       </div>
-                      <h3 className="text-lg font-black leading-tight mb-0.5">
-                        {isStoredValue ? formatBalance(coupon) : (coupon.description || 'Discount')}
+                      <h3 className="text-lg font-black leading-tight mb-1">
+                        {isStoredValue && balanceInfo ? balanceInfo.label : (coupon.description || 'Discount')}
                       </h3>
+                      {isStoredValue && balanceInfo && (
+                        <div className="mt-1">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 mb-1">
+                            <span>Balance</span>
+                            <span>{Math.round(balanceInfo.percent)}%</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-emerald-500"
+                              style={{ width: `${balanceInfo.percent}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                       <div className="flex items-center flex-wrap gap-1.5 text-[13px] font-medium mt-1">
                         <span className="text-gray-500">Valid until {format(parseISO(coupon.expiry_date), 'MMM d, yyyy')}</span>
                         <span className="text-gray-300">•</span>
@@ -672,26 +735,56 @@ export default function App() {
             </div>
 
             <div className="flex-1 px-6 flex flex-col items-center justify-center text-center overflow-y-auto min-h-0 no-scrollbar pb-4 pt-2">
-              <div className="w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center rounded-3xl overflow-hidden bg-gray-50 shrink-0 mb-4 sm:mb-6 shadow-sm border border-black/5">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center rounded-3xl overflow-hidden bg-gray-50 shrink-0 mb-4 sm:mb-6 shadow-sm border border-black/5 p-3">
                 {selectedCoupon.brand?.logo_url ? (
                   <img
                     src={selectedCoupon.brand.logo_url}
                     alt={`${selectedCoupon.title} logo`}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
                 ) : (
-                  React.cloneElement(getBrandIcon(selectedCoupon.title) as React.ReactElement, { size: 60 })
+                  getBrandIcon(selectedCoupon.title, 60)
                 )}
               </div>
 
               <div className="shrink-0 mb-4 sm:mb-6">
-                <h2 className="text-3xl sm:text-4xl font-black mb-1 sm:mb-2 leading-tight px-4">
+                <h2 className="text-3xl sm:text-4xl font-black mb-2 sm:mb-3 leading-tight px-4">
                   {selectedCoupon.coupon_type === 'voucher' || selectedCoupon.coupon_type === 'gift_card'
-                    ? formatBalance(selectedCoupon)
+                    ? (selectedBalanceInfo?.label ?? '')
                     : (selectedCoupon.description || 'Discount')}
                 </h2>
+                {(selectedCoupon.coupon_type === 'voucher' || selectedCoupon.coupon_type === 'gift_card') && selectedBalanceInfo && (
+                  <div className="px-6 mb-2">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 mb-1">
+                      <span>Balance</span>
+                      <span>{Math.round(selectedBalanceInfo.percent)}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-emerald-500"
+                        style={{ width: `${selectedBalanceInfo.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 <p className="text-gray-400 font-medium text-sm sm:text-base">on purchase of {selectedCoupon.title}</p>
               </div>
+
+              {(() => {
+                const websiteUrl = normalizeWebsiteUrl(selectedCoupon.brand?.website);
+                if (!websiteUrl) return null;
+                return (
+                  <a
+                    href={websiteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mb-5 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-100 text-gray-600 text-xs sm:text-sm font-bold uppercase tracking-wider hover:bg-gray-200 transition-colors"
+                  >
+                    Visit website
+                    <ArrowRight size={16} />
+                  </a>
+                );
+              })()}
 
               <div className="flex flex-col items-center gap-1.5 shrink-0 mb-6 sm:mb-8">
                 <p className="text-gray-500 font-medium text-sm sm:text-base">Valid until {format(parseISO(selectedCoupon.expiry_date), 'MMM d, yyyy')}</p>
@@ -1004,17 +1097,19 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Offer Description</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="e.g. 15% off"
-                    className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  />
-                </div>
+                {formData.coupon_type === 'discount' && (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Offer Description</label>
+                    <input
+                      required
+                      type="text"
+                      placeholder="e.g. 15% off"
+                      className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold"
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Coupon Type</label>
                   <div className="grid grid-cols-2 gap-3">
