@@ -128,25 +128,26 @@ class NewPassword(SQLModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
 
-class IssuerBase(SQLModel):
+class BrandBase(SQLModel):
     id : uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    color: str | None = Field(default=None, max_length=50)
 
-class Issuer(IssuerBase, table=True):
+class Brand(BrandBase, table=True):
     name: str = Field(min_length=1, max_length=255)
     logo_url: str | None = Field(default=None, max_length=255)
     website: str | None = Field(default=None, max_length=255)
-    coupons: list["Coupon"] = Relationship(back_populates="issuer")
+    coupons: list["Coupon"] = Relationship(back_populates="brand")
+
+class BrandPublic(BrandBase):
+    name: str
+    logo_url: str | None = None
+    website: str | None = None
+
+class BrandsPublic(SQLModel):
+    data: list[BrandPublic]
+    count: int
 
 class CouponBase(SQLModel):
-    '''id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    code TEXT NOT NULL,
-    source TEXT NOT NULL,
-    description TEXT,
-    expiry_date TEXT NOT NULL,
-    is_used INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    '''
     id : uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -160,8 +161,8 @@ class Coupon(CouponBase, table=True):
     expiry_date: datetime
     is_used: bool = False
     code: str = Field(min_length=1, max_length=255)
-    issuer_id: uuid.UUID = Field(foreign_key="issuer.id", nullable=False)
-    issuer: Issuer = Relationship(
+    brand_id: uuid.UUID = Field(foreign_key="brand.id", nullable=False)
+    brand: Brand = Relationship(
         back_populates="coupons", sa_relationship_kwargs={"lazy": "selectin"}
     )
 
@@ -173,7 +174,10 @@ class CouponCreate(SQLModel):
     description: str | None = Field(default=None, max_length=255)
     expiry_date: datetime
     code: str = Field(min_length=1, max_length=255)
-    issuer_id: uuid.UUID | None = None
+    brand_id: uuid.UUID | None = None
+    brand_name: str | None = None
+    brand_logo_url: str | None = None
+    brand_color: str | None = None
 
 
 # Properties to receive on coupon update, all are optional
@@ -184,7 +188,10 @@ class CouponUpdate(SQLModel):
     expiry_date: datetime | None = None
     is_used: bool | None = None
     code: str | None = Field(default=None, min_length=1, max_length=255)
-    issuer_id: uuid.UUID | None = None
+    brand_id: uuid.UUID | None = None
+    brand_name: str | None = None
+    brand_logo_url: str | None = None
+    brand_color: str | None = None
 
 
 # Properties to return via API
@@ -197,7 +204,8 @@ class CouponPublic(SQLModel):
     expiry_date: datetime
     is_used: bool
     code: str
-    issuer_id: uuid.UUID | None = None
+    brand_id: uuid.UUID | None = None
+    brand: BrandPublic | None = None
 
 
 class CouponsPublic(SQLModel):
