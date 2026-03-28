@@ -288,7 +288,7 @@ export default function App() {
 
   const redeemVoucherAmount = async (coupon: Coupon) => {
     const currentValue = coupon.current_value ?? coupon.initial_value ?? 0;
-    const amount = Number(redeemAmount);
+    const amount = coupon.coupon_type === 'gift_card' ? currentValue : Number(redeemAmount);
     if (!amount || amount <= 0) {
       setRedeemError('Enter a valid amount to redeem.');
       return;
@@ -387,7 +387,7 @@ export default function App() {
   const getDaysLeftInfo = (dateStr: string) => {
     const expiryDate = parseISO(dateStr);
     const days = differenceInDays(startOfDay(expiryDate), startOfDay(new Date()));
-    
+
     let text = '';
     let status = 'valid';
 
@@ -600,9 +600,9 @@ export default function App() {
                           const { text, status } = getDaysLeftInfo(coupon.expiry_date);
                           return (
                             <span className={cn(
-                              status === 'expired' ? "text-red-400" : 
-                              status === 'expiring' ? "text-red-500 font-bold" : 
-                              "text-gray-400"
+                              status === 'expired' ? "text-red-400" :
+                                status === 'expiring' ? "text-red-500 font-bold" :
+                                  "text-gray-400"
                             )}>
                               {text}
                             </span>
@@ -701,8 +701,8 @@ export default function App() {
                     <div className={cn(
                       "px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-wide",
                       status === 'expired' ? "bg-red-50 text-red-500" :
-                      status === 'expiring' ? "bg-red-500 text-white shadow-md shadow-red-500/20" :
-                      "bg-indigo-50 text-indigo-600"
+                        status === 'expiring' ? "bg-red-500 text-white shadow-md shadow-red-500/20" :
+                          "bg-indigo-50 text-indigo-600"
                     )}>
                       {text}
                     </div>

@@ -175,7 +175,7 @@ class CouponService:
 			if "current_value" in update_dict or "is_used" in update_dict:
 				current_value = update_dict.get("current_value", coupon.current_value)
 				is_used = update_dict.get("is_used", coupon.is_used)
-				if current_value != 0 or not is_used:
+				if current_value != 0 and is_used:
 					raise HTTPException(
 						status_code=400,
 						detail="Gift cards must be redeemed in full.",
@@ -196,7 +196,6 @@ class CouponService:
 		coupon = self.session.get(Coupon, coupon_id)
 		if not coupon:
 			raise HTTPException(status_code=404, detail="Coupon not found")
-		coupon.is_used = True
-		self.session.add(coupon)
+		self.session.delete(coupon)
 		self.session.commit()
 		return Message(message="Coupon deleted successfully")
