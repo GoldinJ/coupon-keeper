@@ -5,14 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import col, func, select
 
 from app.api.deps import SessionDep, get_current_user
-from app.core.config import settings
 from app.models import (
     Brand,
     Coupon,
-    CouponType,
     CouponCreate,
     CouponPublic,
     CouponsPublic,
+    CouponType,
     CouponUpdate,
     Message,
     User,
