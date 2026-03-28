@@ -73,9 +73,12 @@ const AddItem = () => {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button className="my-4">
-          <Plus className="mr-2" />
-          Add Item
+        <Button 
+          className="fixed bottom-8 right-8 z-50 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200"
+          size="icon"
+        >
+          <Plus className="h-6 w-6" />
+          <span className="sr-only">Add Item</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">

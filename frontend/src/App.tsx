@@ -320,12 +320,6 @@ export default function App() {
                     <Search size={22} />
                   </button>
                   <button
-                    onClick={openAddModal}
-                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                  >
-                    <Plus size={22} />
-                  </button>
-                  <button
                     onClick={() => { setToken(null); localStorage.removeItem('access_token'); }}
                     className="p-2 hover:bg-red-50 rounded-full transition-colors text-red-500 ml-2"
                     title="Sign Out"
@@ -443,6 +437,15 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Floating Action Button for Adding Coupons */}
+      <button
+        onClick={openAddModal}
+        className="fixed bottom-8 right-8 z-40 bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:shadow-xl hover:bg-indigo-700 transition-all active:scale-95 hover:scale-105"
+        aria-label="Add new coupon"
+      >
+        <Plus size={28} />
+      </button>
 
       {/* Redeem Screen (Full Screen Overlay) */}
       <AnimatePresence>
