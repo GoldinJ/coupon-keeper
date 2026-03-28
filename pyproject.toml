@@ -1,2 +1,5 @@
+[tool.ty.rules]
+invalid-argument-type = "warn"
+
 [tool.uv.workspace]
 members = ["backend"]
