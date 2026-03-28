@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, CheckCircle, Clock, Tag, Calendar, X, Search, Edit2, ChevronRight, Info, ArrowRight, Scissors, LogOut } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, Tag, Calendar, X, Search, Edit2, ChevronRight, Info, ArrowRight, Scissors, LogOut, ChevronDown } from 'lucide-react';
 import { format, isBefore, addDays, parseISO } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -23,6 +23,7 @@ interface Coupon {
     id: string;
     name: string;
     logo_url?: string | null;
+    color?: string | null;
   };
 }
 
@@ -31,9 +32,24 @@ interface Brand {
   name: string;
   logo_url?: string | null;
   website?: string | null;
+  color?: string | null;
 }
 
 const CATEGORIES = ['All', 'Clothes', 'Food', 'Tech', 'Other'];
+const BRAND_SWATCHES = [
+  '#111827',
+  '#111111',
+  '#1D4ED8',
+  '#0EA5E9',
+  '#14B8A6',
+  '#22C55E',
+  '#84CC16',
+  '#EAB308',
+  '#F97316',
+  '#EF4444',
+  '#E11D48',
+  '#8B5CF6',
+];
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('access_token'));
@@ -47,6 +63,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [isBrandOptionsOpen, setIsBrandOptionsOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -55,6 +72,7 @@ export default function App() {
     description: '',
     expiry_date: format(new Date(), 'yyyy-MM-dd'),
     brand_logo_url: '',
+    brand_color: '',
   });
 
   useEffect(() => {
@@ -130,6 +148,7 @@ export default function App() {
         ...formData,
         expiry_date: new Date(formData.expiry_date).toISOString(),
         brand_name: formData.title,
+        brand_color: formData.brand_color || null,
       };
 
       const response = await fetch(url, {
@@ -158,6 +177,7 @@ export default function App() {
 
   const openAddModal = () => {
     setEditingCoupon(null);
+    setIsBrandOptionsOpen(false);
     setFormData({
       title: '',
       code: '',
@@ -165,6 +185,7 @@ export default function App() {
       description: '',
       expiry_date: format(new Date(), 'yyyy-MM-dd'),
       brand_logo_url: '',
+      brand_color: '',
     });
     setIsModalOpen(true);
   };
@@ -172,6 +193,7 @@ export default function App() {
   const openEditModal = (e: React.MouseEvent, coupon: Coupon) => {
     e.stopPropagation();
     setEditingCoupon(coupon);
+    setIsBrandOptionsOpen(false);
     setFormData({
       title: coupon.title,
       code: coupon.code,
@@ -179,6 +201,7 @@ export default function App() {
       description: coupon.description || '',
       expiry_date: format(parseISO(coupon.expiry_date), 'yyyy-MM-dd'),
       brand_logo_url: coupon.brand?.logo_url || '',
+      brand_color: coupon.brand?.color || '',
     });
     setIsModalOpen(true);
   };
@@ -186,6 +209,7 @@ export default function App() {
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingCoupon(null);
+    setIsBrandOptionsOpen(false);
   };
 
   const toggleUsed = async (id: string, currentStatus: boolean) => {
@@ -234,15 +258,13 @@ export default function App() {
     return isBefore(expiryDate, threeDaysFromNow) && !isBefore(expiryDate, new Date());
   };
 
-  const getBrandColor = (title: string) => {
-    const t = title.toLowerCase();
-    if (t.includes('adidas')) return 'text-[#000000]';
-    if (t.includes('iherb')) return 'text-[#458500]';
-    if (t.includes('puma')) return 'text-[#E10600]';
-    if (t.includes('mcdonald')) return 'text-[#FFBC0D]';
-    if (t.includes('nike')) return 'text-[#000000]';
-    return 'text-indigo-600';
+  const resolveBrandColor = (color?: string | null) => {
+    if (!color) return null;
+    const trimmed = color.trim();
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) return trimmed;
+    return null;
   };
+
 
   const getBrandIcon = (title: string) => {
     const t = title.toLowerCase();
@@ -349,6 +371,7 @@ export default function App() {
             <AnimatePresence mode="popLayout">
               {filteredCoupons.map((coupon) => {
                 const expiringSoon = isExpiringSoon(coupon.expiry_date);
+                const brandAccent = resolveBrandColor(coupon.brand?.color);
 
                 return (
                   <motion.div
@@ -370,6 +393,12 @@ export default function App() {
                     {expiringSoon && !coupon.is_used && (
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-red-500 rounded-l-full" />
                     )}
+                    {brandAccent && (
+                      <div
+                        className="absolute left-0 top-0 h-full w-1"
+                        style={{ backgroundColor: brandAccent }}
+                      />
+                    )}
 
                     <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden">
                       {coupon.brand?.logo_url ? (
@@ -379,9 +408,7 @@ export default function App() {
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <div className={getBrandColor(coupon.title)}>
-                          {getBrandIcon(coupon.title)}
-                        </div>
+                        getBrandIcon(coupon.title)
                       )}
                     </div>
 
@@ -427,6 +454,16 @@ export default function App() {
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             className="fixed inset-0 z-50 bg-white flex flex-col"
           >
+            {(() => {
+              const brandAccent = resolveBrandColor(selectedCoupon.brand?.color);
+              if (!brandAccent) return null;
+              return (
+                <div
+                  className="absolute left-0 top-0 h-1 w-full"
+                  style={{ backgroundColor: brandAccent }}
+                />
+              );
+            })()}
             <div className="px-6 pt-12 flex items-center justify-between mb-12">
               <button onClick={() => setIsRedeemOpen(false)} className="p-2 hover:bg-gray-100 rounded-full">
                 <X size={24} />
@@ -437,7 +474,7 @@ export default function App() {
             </div>
 
             <div className="flex-1 px-10 flex flex-col items-center text-center">
-              <div className={cn("w-32 h-32 mb-8 flex items-center justify-center rounded-3xl overflow-hidden", getBrandColor(selectedCoupon.title))}>
+              <div className="w-32 h-32 mb-8 flex items-center justify-center rounded-3xl overflow-hidden bg-gray-50">
                 {selectedCoupon.brand?.logo_url ? (
                   <img
                     src={selectedCoupon.brand.logo_url}
@@ -531,10 +568,71 @@ export default function App() {
                       setFormData({
                         ...formData,
                         title: val,
-                        brand_logo_url: existingIssuer?.logo_url || formData.brand_logo_url
+                        brand_logo_url: existingIssuer?.logo_url || formData.brand_logo_url,
+                        brand_color: existingIssuer?.color || formData.brand_color
                       });
                     }}
                   />
+                  <div className="mt-3">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsBrandOptionsOpen((prev) => !prev)}
+                        className="w-full px-4 py-2.5 rounded-2xl bg-white border border-black/5 shadow-[0_4px_20px_rgba(0,0,0,0.05)] text-sm font-bold text-gray-500 flex items-center justify-between"
+                      >
+                        Brand options
+                        <ChevronDown size={18} className={cn("transition-transform", isBrandOptionsOpen && "rotate-180")} />
+                      </button>
+                      {isBrandOptionsOpen && (
+                        <div className="absolute z-30 mt-2 w-full max-w-md p-4 rounded-2xl bg-white border border-black/5 shadow-2xl">
+                          <div className="space-y-4">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Brand Color</span>
+                                {formData.brand_color ? (
+                                  <button
+                                    type="button"
+                                    className="text-xs font-bold text-gray-400 hover:text-gray-600"
+                                    onClick={() => setFormData({ ...formData, brand_color: '' })}
+                                  >
+                                    Clear
+                                  </button>
+                                ) : null}
+                              </div>
+                              <div className="grid grid-cols-6 gap-2">
+                                {BRAND_SWATCHES.map((color) => {
+                                  const isActive = formData.brand_color === color;
+                                  return (
+                                    <button
+                                      key={color}
+                                      type="button"
+                                      aria-label={`Select ${color}`}
+                                      onClick={() => setFormData({ ...formData, brand_color: color })}
+                                      className={cn(
+                                        "h-8 w-8 rounded-full border border-black/10 transition-all",
+                                        isActive ? "ring-2 ring-offset-2 ring-black/40" : "hover:scale-105"
+                                      )}
+                                      style={{ backgroundColor: color }}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Brand Logo URL (Optional)</label>
+                              <input
+                                type="url"
+                                placeholder="e.g. https://example.com/logo.png"
+                                className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-mono text-sm"
+                                value={formData.brand_logo_url}
+                                onChange={(e) => setFormData({ ...formData, brand_logo_url: e.target.value })}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Discount Description</label>
@@ -556,16 +654,6 @@ export default function App() {
                     className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-mono font-bold"
                     value={formData.code}
                     onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Issuer Logo URL (Optional)</label>
-                  <input
-                    type="url"
-                    placeholder="e.g. https://example.com/logo.png"
-                    className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-mono text-sm"
-                    value={formData.brand_logo_url}
-                    onChange={(e) => setFormData({ ...formData, brand_logo_url: e.target.value })}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
