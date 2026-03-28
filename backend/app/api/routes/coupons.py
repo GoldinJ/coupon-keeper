@@ -7,12 +7,13 @@ from sqlmodel import col, func, select
 from app.api.deps import SessionDep, get_current_user
 from app.core.config import settings
 from app.models import (
+    Brand,
     Coupon,
+    CouponType,
     CouponCreate,
     CouponPublic,
     CouponsPublic,
     CouponUpdate,
-    Brand,
     Message,
     User,
 )
@@ -20,24 +21,9 @@ from app.models import (
 router = APIRouter(prefix="/coupons", tags=["coupons"])
 
 
-def _allow_local_coupon_auth_bypass() -> bool:
-    return settings.ENVIRONMENT == "local" and settings.ENABLE_LOCAL_COUPON_AUTH_BYPASS
-
-
-def _allow_local_default_brand() -> bool:
-    return settings.ENVIRONMENT == "local" and settings.ENABLE_LOCAL_DEFAULT_ISSUER
-
-
 def _require_coupon_user(current_user: User | None) -> User:
     if current_user:
         return current_user
-    if _allow_local_coupon_auth_bypass():
-        return User(
-            email="local-dev@example.com",
-            hashed_password="local-dev-only",
-            is_active=True,
-            is_superuser=True,
-        )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Not authenticated",
@@ -50,6 +36,7 @@ def _resolve_brand_id(
     brand_name: str | None = None,
     brand_logo_url: str | None = None,
     brand_color: str | None = None,
+    brand_website: str | None = None,
 ) -> uuid.UUID:
     if brand_id is not None:
         return brand_id
@@ -66,23 +53,25 @@ def _resolve_brand_id(
             if brand_color and brand.color != brand_color:
                 brand.color = brand_color
                 modified = True
+            if brand_website and brand.website != brand_website:
+                brand.website = brand_website
+                modified = True
             if modified:
                 session.add(brand)
                 session.commit()
                 session.refresh(brand)
             return brand.id
         else:
-            new_brand = Brand(name=brand_name, logo_url=brand_logo_url, color=brand_color)
+            new_brand = Brand(
+                name=brand_name,
+                logo_url=brand_logo_url,
+                color=brand_color,
+                website=brand_website,
+            )
             session.add(new_brand)
             session.commit()
             session.refresh(new_brand)
             return new_brand.id
-
-    if not _allow_local_default_brand():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="brand_id or brand_name is required",
-        )
 
     default_brand = session.exec(
         select(Brand).where(Brand.name == "Local Default Brand")
@@ -157,13 +146,16 @@ def create_coupon(
     Create new coupon.
     """
     _require_coupon_user(current_user)
-    coupon_payload = coupon_in.model_dump(exclude={"brand_name", "brand_logo_url", "brand_color"})
+    coupon_payload = coupon_in.model_dump(
+        exclude={"brand_name", "brand_logo_url", "brand_color", "brand_website"}
+    )
     coupon_payload["brand_id"] = _resolve_brand_id(
         session,
         coupon_in.brand_id,
         brand_name=coupon_in.brand_name,
         brand_logo_url=coupon_in.brand_logo_url,
         brand_color=coupon_in.brand_color,
+        brand_website=coupon_in.brand_website,
     )
     coupon = Coupon.model_validate(coupon_payload)
     session.add(coupon)
@@ -188,10 +180,11 @@ def update_coupon(
     coupon = session.get(Coupon, id)
     if not coupon:
         raise HTTPException(status_code=404, detail="Coupon not found")
-    if not current_user.is_superuser and not _allow_local_coupon_auth_bypass():
-        raise HTTPException(status_code=403, detail="Not enough permissions")
 
-    update_dict = coupon_in.model_dump(exclude_unset=True, exclude={"brand_name", "brand_logo_url", "brand_color"})
+    update_dict = coupon_in.model_dump(
+        exclude_unset=True,
+        exclude={"brand_name", "brand_logo_url", "brand_color", "brand_website"},
+    )
     if coupon_in.brand_name:
         update_dict["brand_id"] = _resolve_brand_id(
             session,
@@ -199,9 +192,21 @@ def update_coupon(
             brand_name=coupon_in.brand_name,
             brand_logo_url=coupon_in.brand_logo_url,
             brand_color=coupon_in.brand_color,
+            brand_website=coupon_in.brand_website,
         )
     elif update_dict.get("brand_id") is None and "brand_id" in update_dict:
         update_dict["brand_id"] = _resolve_brand_id(session, None)
+
+    effective_type = coupon_in.coupon_type or coupon.coupon_type
+    if effective_type == CouponType.GIFT_CARD:
+        if "current_value" in update_dict or "is_used" in update_dict:
+            current_value = update_dict.get("current_value", coupon.current_value)
+            is_used = update_dict.get("is_used", coupon.is_used)
+            if current_value != 0 or not is_used:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Gift cards must be redeemed in full.",
+                )
 
     coupon.sqlmodel_update(update_dict)
     session.add(coupon)
@@ -223,8 +228,6 @@ def delete_coupon(
     coupon = session.get(Coupon, id)
     if not coupon:
         raise HTTPException(status_code=404, detail="Coupon not found")
-    if not current_user.is_superuser and not _allow_local_coupon_auth_bypass():
-        raise HTTPException(status_code=403, detail="Not enough permissions")
     session.delete(coupon)
     session.commit()
     return Message(message="Coupon deleted successfully")
