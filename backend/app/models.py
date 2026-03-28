@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 
 from pydantic import EmailStr
 from sqlalchemy import DateTime
@@ -9,6 +10,16 @@ from sqlmodel import Field, Relationship, SQLModel
 def get_datetime_utc() -> datetime:
     return datetime.now(timezone.utc)
 
+
+class CouponType(str, Enum):
+    DISCOUNT = "discount"
+    VOUCHER = "voucher"
+    GIFT_CARD = "gift_card"
+
+class Currency(str, Enum):
+    ILS = "ILS"
+    USD = "USD"
+    EUR = "EUR"
 
 # Shared properties
 class UserBase(SQLModel):
@@ -165,6 +176,10 @@ class Coupon(CouponBase, table=True):
     brand: Brand = Relationship(
         back_populates="coupons", sa_relationship_kwargs={"lazy": "selectin"}
     )
+    coupon_type: CouponType = Field(default=CouponType.DISCOUNT, max_length=50)
+    initial_value: float | None = Field(default=None)
+    current_value: float | None = Field(default=None)
+    currency: Currency | None = Field(default=Currency.ILS)
 
 
 # Properties to receive on coupon creation
@@ -178,6 +193,11 @@ class CouponCreate(SQLModel):
     brand_name: str | None = None
     brand_logo_url: str | None = None
     brand_color: str | None = None
+    brand_website: str | None = None
+    coupon_type: CouponType | None = Field(default=CouponType.DISCOUNT)
+    initial_value: float | None = None
+    current_value: float | None = None
+    currency: Currency | None = Field(default=Currency.ILS)
 
 
 # Properties to receive on coupon update, all are optional
@@ -192,6 +212,11 @@ class CouponUpdate(SQLModel):
     brand_name: str | None = None
     brand_logo_url: str | None = None
     brand_color: str | None = None
+    brand_website: str | None = None
+    coupon_type: CouponType | None = None
+    initial_value: float | None = None
+    current_value: float | None = None
+    currency: Currency | None = None
 
 
 # Properties to return via API
@@ -206,6 +231,10 @@ class CouponPublic(SQLModel):
     code: str
     brand_id: uuid.UUID | None = None
     brand: BrandPublic | None = None
+    coupon_type: CouponType = CouponType.DISCOUNT
+    initial_value: float | None = None
+    current_value: float | None = None
+    currency: Currency | None = None
 
 
 class CouponsPublic(SQLModel):

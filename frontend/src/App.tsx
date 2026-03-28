@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Trash2, CheckCircle, Clock, Tag, Calendar, X, Search, Edit2, ChevronRight, Info, ArrowRight, Scissors, LogOut, ChevronDown } from 'lucide-react';
-import { format, isBefore, addDays, parseISO } from 'date-fns';
+import { format, isBefore, addDays, parseISO, differenceInDays, startOfDay } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -19,10 +19,15 @@ interface Coupon {
   description: string;
   expiry_date: string;
   is_used: boolean;
+  coupon_type?: 'discount' | 'voucher' | 'gift_card';
+  initial_value?: number | null;
+  current_value?: number | null;
+  currency?: 'ILS' | 'USD' | 'EUR' | null;
   brand?: {
     id: string;
     name: string;
     logo_url?: string | null;
+    website?: string | null;
     color?: string | null;
   };
 }
@@ -36,6 +41,16 @@ interface Brand {
 }
 
 const CATEGORIES = ['All', 'Clothes', 'Food', 'Tech', 'Other'];
+const COUPON_TYPES = [
+  { label: 'Discount', value: 'discount' },
+  { label: 'Voucher', value: 'voucher' },
+  { label: 'Gift Card', value: 'gift_card' },
+];
+const CURRENCIES = [
+  { label: 'ILS (₪)', value: 'ILS' },
+  { label: 'USD ($)', value: 'USD' },
+  { label: 'EUR (€)', value: 'EUR' },
+];
 const BRAND_SWATCHES = [
   '#111827',
   '#111111',
@@ -64,6 +79,10 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState('All');
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isBrandOptionsOpen, setIsBrandOptionsOpen] = useState(false);
+  const [isBrandDropdownOpen, setIsBrandDropdownOpen] = useState(false);
+  const [redeemAmount, setRedeemAmount] = useState('');
+  const [redeemError, setRedeemError] = useState('');
+  const brandSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -73,6 +92,11 @@ export default function App() {
     expiry_date: format(new Date(), 'yyyy-MM-dd'),
     brand_logo_url: '',
     brand_color: '',
+    brand_website: '',
+    coupon_type: 'discount',
+    initial_value: '',
+    current_value: '',
+    currency: 'ILS',
   });
 
   useEffect(() => {
@@ -81,6 +105,13 @@ export default function App() {
       fetchBrands();
     }
   }, [token]);
+
+  useEffect(() => {
+    if (isRedeemOpen) {
+      setRedeemAmount('');
+      setRedeemError('');
+    }
+  }, [isRedeemOpen, selectedCoupon]);
 
   const fetchBrands = async () => {
     try {
@@ -144,11 +175,19 @@ export default function App() {
         ? `/api/v1/coupons/${editingCoupon.id}`
         : '/api/v1/coupons/';
       const method = editingCoupon ? 'PUT' : 'POST';
+      const initialValue = formData.initial_value !== '' ? Number(formData.initial_value) : null;
+      const currentValue = formData.current_value !== '' ? Number(formData.current_value) : null;
+      const isStoredValue = formData.coupon_type === 'voucher' || formData.coupon_type === 'gift_card';
       const payload = {
         ...formData,
         expiry_date: new Date(formData.expiry_date).toISOString(),
         brand_name: formData.title,
         brand_color: formData.brand_color || null,
+        brand_website: formData.brand_website || null,
+        coupon_type: formData.coupon_type,
+        initial_value: isStoredValue ? initialValue : null,
+        current_value: isStoredValue ? (currentValue ?? initialValue) : null,
+        currency: isStoredValue ? formData.currency : null,
       };
 
       const response = await fetch(url, {
@@ -178,6 +217,7 @@ export default function App() {
   const openAddModal = () => {
     setEditingCoupon(null);
     setIsBrandOptionsOpen(false);
+    setIsBrandDropdownOpen(false);
     setFormData({
       title: '',
       code: '',
@@ -186,6 +226,11 @@ export default function App() {
       expiry_date: format(new Date(), 'yyyy-MM-dd'),
       brand_logo_url: '',
       brand_color: '',
+      brand_website: '',
+      coupon_type: 'discount',
+      initial_value: '',
+      current_value: '',
+      currency: 'ILS',
     });
     setIsModalOpen(true);
   };
@@ -194,6 +239,7 @@ export default function App() {
     e.stopPropagation();
     setEditingCoupon(coupon);
     setIsBrandOptionsOpen(false);
+    setIsBrandDropdownOpen(false);
     setFormData({
       title: coupon.title,
       code: coupon.code,
@@ -202,6 +248,11 @@ export default function App() {
       expiry_date: format(parseISO(coupon.expiry_date), 'yyyy-MM-dd'),
       brand_logo_url: coupon.brand?.logo_url || '',
       brand_color: coupon.brand?.color || '',
+      brand_website: coupon.brand?.website || '',
+      coupon_type: coupon.coupon_type || 'discount',
+      initial_value: coupon.initial_value != null ? String(coupon.initial_value) : '',
+      current_value: coupon.current_value != null ? String(coupon.current_value) : '',
+      currency: coupon.currency || 'ILS',
     });
     setIsModalOpen(true);
   };
@@ -210,6 +261,7 @@ export default function App() {
     setIsModalOpen(false);
     setEditingCoupon(null);
     setIsBrandOptionsOpen(false);
+    setIsBrandDropdownOpen(false);
   };
 
   const toggleUsed = async (id: string, currentStatus: boolean) => {
@@ -231,6 +283,80 @@ export default function App() {
       setIsRedeemOpen(false);
     } catch (error) {
       console.error('Failed to update coupon:', error);
+    }
+  };
+
+  const redeemVoucherAmount = async (coupon: Coupon) => {
+    const currentValue = coupon.current_value ?? coupon.initial_value ?? 0;
+    const amount = Number(redeemAmount);
+    if (!amount || amount <= 0) {
+      setRedeemError('Enter a valid amount to redeem.');
+      return;
+    }
+    if (amount > currentValue) {
+      setRedeemError('Amount exceeds remaining balance.');
+      return;
+    }
+    try {
+      const newBalance = Number((currentValue - amount).toFixed(2));
+      const response = await fetch(`/api/v1/coupons/${coupon.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          current_value: newBalance,
+          is_used: newBalance <= 0,
+        }),
+      });
+      if (response.status === 401) {
+        setToken(null);
+        localStorage.removeItem('access_token');
+        return;
+      }
+      if (response.ok) {
+        setRedeemAmount('');
+        setRedeemError('');
+        fetchCoupons();
+        setIsRedeemOpen(false);
+      }
+    } catch (error) {
+      console.error('Failed to redeem voucher amount:', error);
+    }
+  };
+
+  const redeemGiftCardFull = async (coupon: Coupon) => {
+    const currentValue = coupon.current_value ?? coupon.initial_value ?? 0;
+    if (currentValue <= 0) {
+      setRedeemError('Gift card has no remaining balance.');
+      return;
+    }
+    try {
+      const response = await fetch(`/api/v1/coupons/${coupon.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          current_value: 0,
+          is_used: true,
+        }),
+      });
+      if (response.status === 401) {
+        setToken(null);
+        localStorage.removeItem('access_token');
+        return;
+      }
+      if (response.ok) {
+        setRedeemAmount('');
+        setRedeemError('');
+        fetchCoupons();
+        setIsRedeemOpen(false);
+      }
+    } catch (error) {
+      console.error('Failed to redeem gift card:', error);
     }
   };
 
@@ -258,6 +384,30 @@ export default function App() {
     return isBefore(expiryDate, threeDaysFromNow) && !isBefore(expiryDate, new Date());
   };
 
+  const getDaysLeftInfo = (dateStr: string) => {
+    const expiryDate = parseISO(dateStr);
+    const days = differenceInDays(startOfDay(expiryDate), startOfDay(new Date()));
+    
+    let text = '';
+    let status = 'valid';
+
+    if (days < 0) {
+      text = `Expired ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`;
+      status = 'expired';
+    } else if (days === 0) {
+      text = 'Expires today';
+      status = 'expiring';
+    } else if (days === 1) {
+      text = 'Expires tomorrow';
+      status = 'expiring';
+    } else {
+      text = `${days} days left`;
+      if (days <= 3) status = 'expiring';
+    }
+
+    return { text, status };
+  };
+
   const resolveBrandColor = (color?: string | null) => {
     if (!color) return null;
     const trimmed = color.trim();
@@ -273,6 +423,19 @@ export default function App() {
     if (t.includes('puma')) return <Tag size={24} />;
     if (t.includes('mcdonald')) return <Tag size={24} />;
     return <Tag size={24} />;
+  };
+
+  const resolveCurrencySymbol = (currency?: Coupon['currency']) => {
+    if (currency === 'USD') return '$';
+    if (currency === 'EUR') return '€';
+    return '₪';
+  };
+
+  const formatBalance = (coupon: Coupon) => {
+    const symbol = resolveCurrencySymbol(coupon.currency);
+    const current = coupon.current_value ?? coupon.initial_value ?? 0;
+    const initial = coupon.initial_value ?? current;
+    return `${symbol} ${current.toFixed(2)} / ${symbol} ${initial.toFixed(2)} left`;
   };
 
   if (!token) {
@@ -366,6 +529,17 @@ export default function App() {
               {filteredCoupons.map((coupon) => {
                 const expiringSoon = isExpiringSoon(coupon.expiry_date);
                 const brandAccent = resolveBrandColor(coupon.brand?.color);
+                const isStoredValue = coupon.coupon_type === 'voucher' || coupon.coupon_type === 'gift_card';
+                const typeLabel = coupon.coupon_type === 'gift_card'
+                  ? 'Gift Card'
+                  : coupon.coupon_type === 'voucher'
+                    ? 'Voucher'
+                    : 'Discount';
+                const typeClass = coupon.coupon_type === 'gift_card'
+                  ? 'bg-amber-50 text-amber-600'
+                  : coupon.coupon_type === 'voucher'
+                    ? 'bg-emerald-50 text-emerald-600'
+                    : 'bg-indigo-50 text-indigo-600';
 
                 return (
                   <motion.div
@@ -409,10 +583,31 @@ export default function App() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-0.5">
                         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{coupon.title}</span>
+                        <span className={cn(
+                          "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full",
+                          typeClass
+                        )}>
+                          {typeLabel}
+                        </span>
                       </div>
-                      <h3 className="text-lg font-black leading-tight mb-0.5">{coupon.description || 'Discount'}</h3>
-                      <div className="flex items-center gap-2 text-[13px] text-gray-400 font-medium">
-                        <span>till {format(parseISO(coupon.expiry_date), 'MMM d')}</span>
+                      <h3 className="text-lg font-black leading-tight mb-0.5">
+                        {isStoredValue ? formatBalance(coupon) : (coupon.description || 'Discount')}
+                      </h3>
+                      <div className="flex items-center flex-wrap gap-1.5 text-[13px] font-medium mt-1">
+                        <span className="text-gray-500">Valid until {format(parseISO(coupon.expiry_date), 'MMM d, yyyy')}</span>
+                        <span className="text-gray-300">•</span>
+                        {(() => {
+                          const { text, status } = getDaysLeftInfo(coupon.expiry_date);
+                          return (
+                            <span className={cn(
+                              status === 'expired' ? "text-red-400" : 
+                              status === 'expiring' ? "text-red-500 font-bold" : 
+                              "text-gray-400"
+                            )}>
+                              {text}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -467,7 +662,7 @@ export default function App() {
                 />
               );
             })()}
-            <div className="px-6 pt-12 flex items-center justify-between mb-12">
+            <div className="px-6 pt-6 pb-2 flex items-center justify-between shrink-0">
               <button onClick={() => setIsRedeemOpen(false)} className="p-2 hover:bg-gray-100 rounded-full">
                 <X size={24} />
               </button>
@@ -476,8 +671,8 @@ export default function App() {
               </button>
             </div>
 
-            <div className="flex-1 px-10 flex flex-col items-center text-center">
-              <div className="w-32 h-32 mb-8 flex items-center justify-center rounded-3xl overflow-hidden bg-gray-50">
+            <div className="flex-1 px-6 flex flex-col items-center justify-center text-center overflow-y-auto min-h-0 no-scrollbar pb-4 pt-2">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center rounded-3xl overflow-hidden bg-gray-50 shrink-0 mb-4 sm:mb-6 shadow-sm border border-black/5">
                 {selectedCoupon.brand?.logo_url ? (
                   <img
                     src={selectedCoupon.brand.logo_url}
@@ -485,42 +680,127 @@ export default function App() {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  React.cloneElement(getBrandIcon(selectedCoupon.title) as React.ReactElement, { size: 80 })
+                  React.cloneElement(getBrandIcon(selectedCoupon.title) as React.ReactElement, { size: 60 })
                 )}
               </div>
 
-              <h2 className="text-4xl font-black mb-4">{selectedCoupon.description || 'Discount'}</h2>
-              <p className="text-gray-400 font-medium mb-1">on purchase of {selectedCoupon.title}</p>
-              <p className="text-red-500 font-bold mb-12">till {format(parseISO(selectedCoupon.expiry_date), 'MMM d')}</p>
-
-              <div className="bg-white p-6 rounded-3xl shadow-[0_10px_40px_rgba(0,0,0,0.05)] border border-black/5 mb-8">
-                <QRCodeSVG value={selectedCoupon.code} size={160} />
+              <div className="shrink-0 mb-4 sm:mb-6">
+                <h2 className="text-3xl sm:text-4xl font-black mb-1 sm:mb-2 leading-tight px-4">
+                  {selectedCoupon.coupon_type === 'voucher' || selectedCoupon.coupon_type === 'gift_card'
+                    ? formatBalance(selectedCoupon)
+                    : (selectedCoupon.description || 'Discount')}
+                </h2>
+                <p className="text-gray-400 font-medium text-sm sm:text-base">on purchase of {selectedCoupon.title}</p>
               </div>
 
-              <div className="flex flex-col items-center gap-2">
-                <span className="text-xs font-bold text-gray-300 uppercase tracking-[0.2em]">Coupon Code</span>
-                <code className="text-2xl font-black tracking-widest font-mono">{selectedCoupon.code}</code>
+              <div className="flex flex-col items-center gap-1.5 shrink-0 mb-6 sm:mb-8">
+                <p className="text-gray-500 font-medium text-sm sm:text-base">Valid until {format(parseISO(selectedCoupon.expiry_date), 'MMM d, yyyy')}</p>
+                {(() => {
+                  const { text, status } = getDaysLeftInfo(selectedCoupon.expiry_date);
+                  return (
+                    <div className={cn(
+                      "px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-wide",
+                      status === 'expired' ? "bg-red-50 text-red-500" :
+                      status === 'expiring' ? "bg-red-500 text-white shadow-md shadow-red-500/20" :
+                      "bg-indigo-50 text-indigo-600"
+                    )}>
+                      {text}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="bg-white p-4 sm:p-5 rounded-3xl shadow-[0_10px_40px_rgba(0,0,0,0.05)] border border-black/5 shrink-0 mb-4 sm:mb-6">
+                <QRCodeSVG value={selectedCoupon.code} size={140} />
+              </div>
+
+              <div className="flex flex-col items-center gap-1 shrink-0">
+                <span className="text-[10px] sm:text-xs font-bold text-gray-300 uppercase tracking-[0.2em]">Coupon Code</span>
+                <code className="text-xl sm:text-2xl font-black tracking-widest font-mono">{selectedCoupon.code}</code>
               </div>
             </div>
 
-            <div className="p-6">
-              <button
-                onClick={() => toggleUsed(selectedCoupon.id, selectedCoupon.is_used)}
-                className={cn(
-                  "w-full h-16 rounded-[24px] flex items-center justify-between px-8 transition-all active:scale-[0.98] shadow-lg",
-                  selectedCoupon.is_used ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-indigo-600 text-white"
-                )}
-                disabled={!!selectedCoupon.is_used}
-              >
-                <div className="flex items-center gap-2">
-                  <ChevronRight size={20} />
-                  <ChevronRight size={20} className="-ml-3 opacity-50" />
+            <div className="p-4 pb-8 sm:p-6 sm:pb-8 shrink-0">
+              {selectedCoupon.coupon_type === 'voucher' ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Amount to redeem"
+                      className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all font-bold"
+                      value={redeemAmount}
+                      onChange={(e) => {
+                        setRedeemAmount(e.target.value);
+                        setRedeemError('');
+                      }}
+                      disabled={!!selectedCoupon.is_used}
+                    />
+                  </div>
+                  {redeemError && (
+                    <p className="text-sm font-bold text-red-500">{redeemError}</p>
+                  )}
+                  <button
+                    onClick={() => redeemVoucherAmount(selectedCoupon)}
+                    className={cn(
+                      "w-full h-16 rounded-[24px] flex items-center justify-between px-8 transition-all active:scale-[0.98] shadow-lg",
+                      selectedCoupon.is_used ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-emerald-600 text-white"
+                    )}
+                    disabled={!!selectedCoupon.is_used}
+                  >
+                    <div className="flex items-center gap-2">
+                      <ChevronRight size={20} />
+                      <ChevronRight size={20} className="-ml-3 opacity-50" />
+                    </div>
+                    <span className="text-lg font-black uppercase tracking-widest">
+                      {selectedCoupon.is_used ? 'REDEEMED' : 'REDEEM AMOUNT'}
+                    </span>
+                    <div className="w-5" />
+                  </button>
                 </div>
-                <span className="text-lg font-black uppercase tracking-widest">
-                  {selectedCoupon.is_used ? 'REDEEMED' : 'REDEEM'}
-                </span>
-                <div className="w-5" />
-              </button>
+              ) : selectedCoupon.coupon_type === 'gift_card' ? (
+                <div className="space-y-3">
+                  {redeemError && (
+                    <p className="text-sm font-bold text-red-500">{redeemError}</p>
+                  )}
+                  <button
+                    onClick={() => redeemGiftCardFull(selectedCoupon)}
+                    className={cn(
+                      "w-full h-16 rounded-[24px] flex items-center justify-between px-8 transition-all active:scale-[0.98] shadow-lg",
+                      selectedCoupon.is_used ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-amber-500 text-white"
+                    )}
+                    disabled={!!selectedCoupon.is_used}
+                  >
+                    <div className="flex items-center gap-2">
+                      <ChevronRight size={20} />
+                      <ChevronRight size={20} className="-ml-3 opacity-50" />
+                    </div>
+                    <span className="text-lg font-black uppercase tracking-widest">
+                      {selectedCoupon.is_used ? 'REDEEMED' : 'REDEEM FULL AMOUNT'}
+                    </span>
+                    <div className="w-5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => toggleUsed(selectedCoupon.id, selectedCoupon.is_used)}
+                  className={cn(
+                    "w-full h-16 rounded-[24px] flex items-center justify-between px-8 transition-all active:scale-[0.98] shadow-lg",
+                    selectedCoupon.is_used ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-indigo-600 text-white"
+                  )}
+                  disabled={!!selectedCoupon.is_used}
+                >
+                  <div className="flex items-center gap-2">
+                    <ChevronRight size={20} />
+                    <ChevronRight size={20} className="-ml-3 opacity-50" />
+                  </div>
+                  <span className="text-lg font-black uppercase tracking-widest">
+                    {selectedCoupon.is_used ? 'REDEEMED' : 'REDEEM'}
+                  </span>
+                  <div className="w-5" />
+                </button>
+              )}
             </div>
           </motion.div>
         )}
@@ -551,31 +831,108 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                <datalist id="brands-list">
-                  {brands.map(iss => (
-                    <option key={iss.id} value={iss.name} />
-                  ))}
-                </datalist>
-                <div>
+                <div
+                  className="relative z-40"
+                  ref={brandSectionRef}
+                  onBlur={(event) => {
+                    const nextTarget = event.relatedTarget as HTMLElement | null;
+                    if (nextTarget && brandSectionRef.current?.contains(nextTarget)) {
+                      return;
+                    }
+                    setIsBrandDropdownOpen(false);
+                    setIsBrandOptionsOpen(false);
+                  }}
+                >
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Brand Name</label>
-                  <input
-                    required
-                    type="text"
-                    list="brands-list"
-                    placeholder="e.g. Adidas, iHerb"
-                    className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold"
-                    value={formData.title}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      const existingIssuer = brands.find(iss => iss.name === val);
-                      setFormData({
-                        ...formData,
-                        title: val,
-                        brand_logo_url: existingIssuer?.logo_url || formData.brand_logo_url,
-                        brand_color: existingIssuer?.color || formData.brand_color
-                      });
-                    }}
-                  />
+                  <div className="relative">
+                    <input
+                      required
+                      type="text"
+                      placeholder="Search or add brand..."
+                      className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold pr-10"
+                      value={formData.title}
+                      onFocus={() => setIsBrandDropdownOpen(true)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const existingBrand = brands.find(b => b.name.toLowerCase() === val.toLowerCase());
+                        setFormData({
+                          ...formData,
+                          title: val,
+                          brand_logo_url: existingBrand?.logo_url || formData.brand_logo_url,
+                          brand_color: existingBrand?.color || formData.brand_color,
+                          brand_website: existingBrand?.website || formData.brand_website,
+                        });
+                        setIsBrandDropdownOpen(true);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsBrandDropdownOpen(prev => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+                    >
+                      <ChevronDown size={18} className={cn("transition-transform", isBrandDropdownOpen && "rotate-180")} />
+                    </button>
+                  </div>
+
+                  <AnimatePresence>
+                    {isBrandDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="absolute z-50 w-full mt-2 bg-white rounded-2xl shadow-xl border border-black/5 overflow-hidden max-h-60 overflow-y-auto no-scrollbar"
+                      >
+                        {(() => {
+                          const query = formData.title.trim().toLowerCase();
+                          const filteredBrands = brands.filter(b => b.name.toLowerCase().includes(query));
+                          const exactMatch = brands.find(b => b.name.toLowerCase() === query);
+                          const showAddOption = query && !exactMatch;
+
+                          return (
+                            <div className="p-2 space-y-1 text-sm">
+                              {filteredBrands.map(brand => (
+                                <button
+                                  key={brand.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setFormData({
+                                      ...formData,
+                                      title: brand.name,
+                                      brand_logo_url: brand.logo_url || formData.brand_logo_url,
+                                      brand_color: brand.color || formData.brand_color,
+                                      brand_website: brand.website || formData.brand_website,
+                                    });
+                                    setIsBrandDropdownOpen(false);
+                                  }}
+                                  className="w-full text-left px-4 py-2.5 rounded-xl hover:bg-gray-50 transition-colors flex items-center justify-between group"
+                                >
+                                  <span className="font-bold text-gray-700">{brand.name}</span>
+                                  {brand.color && (
+                                    <span className="w-4 h-4 rounded-full border border-black/10" style={{ backgroundColor: brand.color }} />
+                                  )}
+                                </button>
+                              ))}
+                              {showAddOption && (
+                                <button
+                                  type="button"
+                                  onClick={() => setIsBrandDropdownOpen(false)}
+                                  className="w-full text-left px-4 py-2.5 rounded-xl hover:bg-indigo-50 text-indigo-600 transition-colors flex items-center gap-2"
+                                >
+                                  <Plus size={16} />
+                                  <span className="font-bold">Add "{formData.title}"</span>
+                                </button>
+                              )}
+                              {!showAddOption && filteredBrands.length === 0 && (
+                                <div className="px-4 py-3 text-center text-gray-400 font-medium">
+                                  No matching brands
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   <div className="mt-3">
                     <div className="relative">
                       <button
@@ -631,6 +988,16 @@ export default function App() {
                                 onChange={(e) => setFormData({ ...formData, brand_logo_url: e.target.value })}
                               />
                             </div>
+                            <div>
+                              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Brand Website (Optional)</label>
+                              <input
+                                type="url"
+                                placeholder="e.g. https://brand.example"
+                                className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-mono text-sm"
+                                value={formData.brand_website}
+                                onChange={(e) => setFormData({ ...formData, brand_website: e.target.value })}
+                              />
+                            </div>
                           </div>
                         </div>
                       )}
@@ -638,7 +1005,7 @@ export default function App() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Discount Description</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Offer Description</label>
                   <input
                     required
                     type="text"
@@ -648,6 +1015,67 @@ export default function App() {
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Coupon Type</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {COUPON_TYPES.map((type) => (
+                      <button
+                        key={type.value}
+                        type="button"
+                        onClick={() => {
+                          if (type.value === 'discount') {
+                            setFormData({
+                              ...formData,
+                              coupon_type: type.value,
+                              initial_value: '',
+                              current_value: '',
+                              currency: 'ILS',
+                            });
+                            return;
+                          }
+                          setFormData({ ...formData, coupon_type: type.value });
+                        }}
+                        className={cn(
+                          "px-4 py-3 rounded-2xl text-sm font-black uppercase tracking-wider transition-all",
+                          formData.coupon_type === type.value
+                            ? "bg-indigo-600 text-white shadow-lg"
+                            : "bg-gray-50 text-gray-400 hover:text-gray-600"
+                        )}
+                      >
+                        {type.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {(formData.coupon_type === 'voucher' || formData.coupon_type === 'gift_card') && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Initial Value</label>
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="e.g. 100"
+                        className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all font-bold"
+                        value={formData.initial_value}
+                        onChange={(e) => setFormData({ ...formData, initial_value: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Currency</label>
+                      <select
+                        className="w-full px-5 py-3 rounded-2xl bg-gray-50 border-transparent focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all font-bold appearance-none"
+                        value={formData.currency}
+                        onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                      >
+                        {CURRENCIES.map((currency) => (
+                          <option key={currency.value} value={currency.value}>{currency.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Coupon Code</label>
                   <input
